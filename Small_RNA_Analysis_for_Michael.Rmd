@@ -1,0 +1,406 @@
+---
+title: "Septoria RNAseq analysis of RNAi transcripts"
+author: "David Showalter"
+date: "5/9/2022"
+output: html_document
+---
+
+# Note (READ FIRST):
+
+This is just a reference document to check the process to obtain the DESeq2 objects. This means you don't need to re-run this file if you are looking for a comparison of all phenotypes at each time against the susceptible phenotypes at control. The files that come from this assay are:
+
+## DESeq2 required files:
+
+These files are the files that DESeq2 uses to create the lineal model for differential expression.
+
+- `~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/list_counts.Rds`: A RDS file (R readable file) with the list of counts of gene per genotype per time
+- `"~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/count_name.Rds`: A RDS file with a data frame with information about each dataset: Genotype, Phenotype, and interactions for the lineal model used in DESeq
+
+## DESeq2 lineal model output files:
+
+These are the files output of the lineal model where everything is compared to Control-Susceptible
+
+- `~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/data_interaction_Pheno.Rds`: A RDS file with the DESeq2 count object (dds object) for the comparison of all data sets versus Susceptible-Control
+- `~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/vst_interaction_data_Pheno.Rds`: The normalized VST DESeq2 object from the dds object created above.
+
+***
+
+# Process
+
+## Reading libraries
+
+```{r}
+library(DESeq2)
+library(tidyverse)
+library(dplyr)
+
+```
+
+## Reading in the raw counts
+
+```{r, eval=F}
+list.names <- list.files("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Smusiva_RNA_counts", pattern = "_counts.txt", full.names = T)
+list.counts <- lapply(list.names, read.table, header=T,row.names=1)
+names(list.counts) <- basename(list.files("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Smusiva_RNA_counts", pattern = "_counts.txt", full.names = T)) %>% gsub(pattern = "_counts.txt", replacement = "")
+
+# Time-point name data
+count_name <- read.table("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/sample_time_points.txt", header=F)
+colnames(count_name) <- c("Index","Sample","Treatment","Rep")
+```
+
+## Changing the names to time-points 
+
+```{r, eval=F}
+for (i in 1:length(list.counts)){
+  count_name.sub <- count_name[count_name$Sample %in% names(list.counts)[[i]],]
+  col.names <- unname(count_name.sub[match(colnames(list.counts[[i]]), count_name.sub$Index),c(2,3,4)] %>% apply(MARGIN = 1, paste0, collapse="_"))
+  colnames(list.counts[[i]]) <- col.names
+}
+```
+
+## Creating the condition table from the time-point name data
+
+```{r, eval=F}
+rownames(count_name) <- apply(count_name[,c(2,3,4)], MARGIN = 1, paste0, collapse = "_")
+count_name <- count_name[,-c(1,4)]
+count_name$type <- "paired_end"
+colnames(count_name) <- c("SampleName","Condition","Type")
+count_name$rnam<-row.names(count_name)
+```
+
+## Combining the data
+
+```{r, eval=F}
+for (i in 1:length(list.counts)){
+  list.counts[[i]] <-  list.counts[[i]] + 1
+}
+list.counts <- as.data.frame(do.call(cbind, unname(list.counts)))
+```
+
+## Adding the phenotypes
+
+```{r, eval=F}
+phenotypes <- read.table("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Phenotypes", header = T)
+phenotypes$Phenotype[phenotypes$Phenotype %in% "?"] <- "Resistant"
+count_name.data.2 <- merge(count_name, phenotypes, by="SampleName")
+
+rownames(count_name.data.2) <- count_name.data.2$rnam
+count_name.data <- count_name.data.2
+count_name.data <- count_name.data[match(colnames(list.counts), rownames(count_name.data), nomatch = 0),]
+count_name.data$interaction <- paste0(count_name.data$SampleName, "_", count_name.data$Phenotype)
+colnames(list.counts) %in% rownames(count_name.data)
+
+#saveRDS(list.counts, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/list_counts.Rds")
+#saveRDS(count_name.data, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/count_name.Rds")
+```
+
+## Creating the DESeq object 
+
+```{r, eval=F}
+#list.counts <- readRDS("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/list_counts.Rds")
+#count_name.data <- readRDS("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/count_name.Rds")
+
+#removing  control samples because we don't expect S.musiva reads in control samples
+list.counts.noc<-list.counts %>% select(!contains("Control"))
+count_name.data.noc<-subset(count_name.data, count_name.data$Condition != "Control")
+
+#specifying inputs and statistical model
+dds.noc <- DESeqDataSetFromMatrix(countData = list.counts.noc,
+                              colData = count_name.data.noc,
+                              design = ~ Phenotype + Condition + Phenotype:Condition)
+
+#assigning refrence levels
+dds.noc$Phenotype <- relevel(dds.noc$Phenotype, ref = "Susceptible")
+dds.noc$Condition <- relevel(dds.noc$Condition, ref = "0h")
+#running DESeq and variace stabilization aware of design
+dds.noc <- DESeq(dds.noc)
+vst.data.noc <- vst(dds.noc, blind = FALSE)
+
+#saving DESeq outputs as R data object
+#saveRDS(dds.noc, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/full_model_noC.Rds")
+#saveRDS(vst.data.noc, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/full_model_noC.vst.Rds")
+
+#simplifying model to just timepoint and ignoring resistance?
+#specifying inputs and statistical model
+dds <- DESeqDataSetFromMatrix(countData = list.counts.noc,
+                              colData = count_name.data.noc,
+                              design = ~ Condition)
+
+#assigning refrence levels
+dds$Condition <- relevel(dds$Condition, ref = "0h")
+#running DESeq and variace stabilization aware of design
+dds <- DESeq(dds)
+vst.data <- vst(dds, blind = FALSE)
+
+#saving DESeq outputs as R data object
+#saveRDS(dds, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Time_only_models.Rds")
+#saveRDS(vst.data, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Time_only_model.vst.Rds")
+```
+
+#Contrast statements to test hypotheses
+This is based on the DESeq help documentation for the results function specifically when using multifactor designs with interactions of interest (Example 3)
+
+```{r}
+#dds.noc <- readRDS(file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/full_models.Rds")
+#vst.data <- readRDS(file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/full_model.vst.Rds")
+
+resultsNames(dds.noc)
+# the Phenotype effect for Condition 0h (the main effect)
+pheno_at_0h<-results(dds.noc, contrast=c("Phenotype","Resistant","Susceptible"))
+saveRDS(pheno_at_0h, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_0h.list.Rds")
+# the 24h Condition effect for Phenotype Susceptible (the main effect)
+x24vs0S<-results(dds.noc, contrast=c("Condition","24h","0h"))
+saveRDS(x24vs0S, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/24vs0hS.list.Rds")
+# the 72h Condition effect for Phenotype Susceptible (the main effect)
+x72vs0S<-results(dds.noc, contrast=c("Condition","72h","0h"))
+saveRDS(x72vs0S, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/72vs0hS.list.Rds")
+x72vs24S<-results(dds.noc, contrast=list( c("Condition_72h_vs_0h","Condition_24h_vs_0h") ))
+saveRDS(x72vs24S, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/72vs24S.list.Rds")
+x72vs24R<-results(dds.noc, contrast=list( c("PhenotypeResistant.Condition72h","PhenotypeResistant.Condition24h") ))
+saveRDS(x72vs24R, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/72vs24R.list.Rds")
+# the Phenotype effect for Condition 24h.
+# this is the main effect *plus* the interaction term
+# (the extra Phenotype effect in Condition 24h compared to Condition 0h).
+# this tests whether or not there are significant differences in gene expression between the phenotypes at 24h
+pheno_at_24h<-results(dds.noc, contrast=list( c("Phenotype_Resistant_vs_Susceptible","PhenotypeResistant.Condition24h") ))
+saveRDS(pheno_at_24h, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_24h.list.Rds")
+# the Phenotype effect for Condition 72h.
+# this is the main effect *plus* the interaction term
+# (the extra Phenotype effect in Condition 72h compared to Condition 0h).
+# this tests whether or not there are significant differences in gene expression between the phenotypes at 72h
+pheno_at_72h<-results(dds.noc, contrast=list( c("Phenotype_Resistant_vs_Susceptible","PhenotypeResistant.Condition72h") ))
+saveRDS(pheno_at_72h, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_72h.list.Rds")
+
+#dds <- readRDS(file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Time_only_models.Rds")
+#vst <- readRDS(file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Time_only_model.vst.Rds")
+
+resultsNames(dds)
+# the 24h Condition effect
+x24vs0<-results(dds, contrast=c("Condition","24h","0h"))
+saveRDS(x24vs0, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/24vs0h.list.Rds")
+# the 72h Condition effect for Phenotype Susceptible (the main effect)
+x72vs0<-results(dds, contrast=c("Condition","72h","0h"))
+saveRDS(x72vs0, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/72vs0h.list.Rds")
+x72vs24<-results(dds, contrast=list( c("Condition_72h_vs_0h","Condition_24h_vs_0h") ))
+saveRDS(x72vs24, file="~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/72vs24.list.Rds")
+```
+
+# Data visualization:
+
+Plotting shrunken LFC for effect of phenotype at control to visualize relationship between mean normalized counts and fold change.
+
+```{r}
+#if (!require("BiocManager", quietly = TRUE))
+#    install.packages("BiocManager")
+#
+#BiocManager::install("apeglm")
+library(apeglm)
+pheno_at_0h_LFC <- lfcShrink(dds.noc, coef="Phenotype_Resistant_vs_Susceptible", type="apeglm")
+plotMA(pheno_at_0h_LFC, ylim=c(-5,5))
+plotDispEsts(dds.noc)
+```
+# Loading in annotation data
+
+Start by including the annotation table of the *S. musiva* reference genome obtained from JGI:
+
+```{r, cache=T}
+sept.ann <- read_delim("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Sepmu1_FilteredModels1_deflines.gff3", delim = "\t", comment = "#", col_names = F)
+sept.ann <- sept.ann[sept.ann$X3 %in% "gene",]
+sept.ann <- separate(sept.ann, col = "X9", sep = ";", c("ID","Name","portal_ID","product_name","proteinID","transcriptID"))
+sept.ann$proteinID <- gsub(sept.ann$proteinID, pattern = "proteinId=", replacement = "")
+sept.ann$transcriptID <- gsub(sept.ann$transcriptID, pattern = "transcriptId=", replacement = "")
+sept.ann$product_name <- gsub(sept.ann$product_name, pattern = "product_name=", replacement = "")
+sept.ann$ID <- gsub(sept.ann$ID, pattern = "ID=", replacement = "")
+
+# Adding effector info
+
+Effector.tab <- read_csv("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Effector_table_SM3.csv")
+sept.ann[sept.ann$transcriptID %in% Effector.tab$transcriptID,]$product_name <- "Predicted_Effector"
+```
+
+
+## Differentially expressed genes 
+
+Criteria for differential expression is adjusted p value < 0.05 and abs(Log2 Fold Change) > 2 
+
+###24h timepoint
+DISREGARD
+```{r}
+#All genes at 24h
+gene_list_24h.df <- lapply(1:length(pheno_at_24h), function (x) {
+  df.x <- data.frame(pheno_at_24h[x])
+})
+
+#FINAL LIST OF ALL GENES at control
+all.gene_list_24h.df <- do.call(cbind, gene_list_24h.df)
+write.table(all.gene_list_24h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/all.24h.txt", sep = "\t")
+
+# Determining genes differentially expressed at 24h
+pheno_at_24h.resistant <- 
+  subset(pheno_at_24h, pheno_at_24h$padj < 0.05 & abs(pheno_at_24h$log2FoldChange) > 2)
+DE_list_24h.df <- lapply(1:length(pheno_at_24h.resistant), function (x) {
+  df.x <- data.frame(pheno_at_24h.resistant[x])
+})
+
+#FINAL LIST OF diff express GENES between phenotypes at 24
+all.DE_list_24h.df <- do.call(cbind, DE_list_24h.df)
+write.table(all.DE_list_24h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/DE.res.24h.txt", sep = "\t")
+
+# Determining genes with significant interaction term at 24h (i.e. phenotype effect is different at 24h than at control).
+pheno_24h.interaction <- 
+  subset(pheno_24h_vs_0h, pheno_24h_vs_0h$padj < 0.05 & abs(pheno_24h_vs_0h$log2FoldChange) > 2)
+DE_list_24h_ineraction.df <- lapply(1:length(pheno_24h.interaction), function (x) {
+  df.x <- data.frame(pheno_24h.interaction[x])
+})
+
+#FINAL LIST OF GENES with significant interaction term at 24h (i.e. phenotype effect is different at 24h than at control).
+all.interaction_list_24h.df <- do.call(cbind, DE_list_24h_ineraction.df)
+write.table(all.interaction_list_24h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/interaction.24h.txt", sep = "\t")
+```
+
+
+###72h timepoint
+DISREGARD
+```{r}
+#All genes at 72h
+gene_list_72h.df <- lapply(1:length(pheno_at_72h), function (x) {
+  df.x <- data.frame(pheno_at_72h[x])
+})
+
+#FINAL LIST OF ALL GENES at control
+all.gene_list_72h.df <- do.call(cbind, gene_list_72h.df)
+write.table(all.gene_list_72h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/all.72h.txt", sep = "\t")
+
+# Determining genes differentially expressed at 72h
+pheno_at_72h.resistant <- 
+  subset(pheno_at_72h, pheno_at_72h$padj < 0.05 & abs(pheno_at_72h$log2FoldChange) > 2)
+DE_list_72h.df <- lapply(1:length(pheno_at_72h.resistant), function (x) {
+  df.x <- data.frame(pheno_at_72h.resistant[x])
+})
+
+#FINAL LIST OF diff express GENES between phenotypes at 72h
+all.DE_list_72h.df <- do.call(cbind, DE_list_72h.df)
+write.table(all.DE_list_72h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/DE.res.72h.txt", sep = "\t")
+
+# Determining genes with significant interaction term at 72h (i.e. phenotype effect is different at 72h than at control).
+pheno_72h.interaction <- 
+  subset(pheno_72h_vs_0h, pheno_72h_vs_0h$padj < 0.05 & abs(pheno_72h_vs_0h$log2FoldChange) > 2)
+DE_list_72h_ineraction.df <- lapply(1:length(pheno_72h.interaction), function (x) {
+  df.x <- data.frame(pheno_72h.interaction[x])
+})
+
+#FINAL LIST OF GENES with significant interaction term at 72h (i.e. phenotype effect is different at 72h than at control).
+all.interaction_list_72h.df <- do.call(cbind, DE_list_72h_ineraction.df)
+write.table(all.interaction_list_72h.df, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/interaction.72h.txt", sep = "\t")
+```
+
+Adding annotation information and combining results from different timepoints
+```{r}
+#pheno_at_0h <- readRDS("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_0h.list.Rds")
+
+#pheno_at_24h <- readRDS("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_24h.list.Rds")
+
+#pheno_at_72h <- readRDS("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/pheno_at_72h.list.Rds")
+#pheno_at_control$ID<- rownames(pheno_at_control)
+#control_anot <- as.data.frame(pheno_at_control)
+#control_anot<- left_join(control_anot, sept.ann, by="ID")
+#control_anot<- control_anot%>% relocate(ID)
+#control_anot<- control_anot[!duplicated(control_anot$ID), ]
+#control_0h_anot<- control_anot
+#colnames(control_0h_anot)<-paste("control", colnames(control_anot), sep ="_")
+#colnames(control_0h_anot)[1]<- as.character("ID")
+
+pheno_at_0h$ID<- rownames(pheno_at_0h)
+zeroh_anot <- as.data.frame(pheno_at_0h)
+zeroh_anot<- left_join(zeroh_anot, sept.ann, by="ID")
+zeroh_anot<- zeroh_anot%>% relocate(ID)
+zeroh_anot<- zeroh_anot[!duplicated(zeroh_anot$ID), ]
+colnames(zeroh_anot)<-paste("zeroh", colnames(zeroh_anot), sep ="_")
+zeroh_anot<- zeroh_anot%>% relocate(zeroh_ID)
+colnames(zeroh_anot)[1]<-"ID"
+
+pheno_at_24h$ID<- rownames(pheno_at_24h)
+twentyfour_anot <- as.data.frame(pheno_at_24h)
+colnames(twentyfour_anot)<-paste("twofourh", colnames(twentyfour_anot), sep ="_")
+twentyfour_anot<- twentyfour_anot%>% relocate(twofourh_ID)
+colnames(twentyfour_anot)[1]<-"ID"
+zeroh_24h_anot<- zeroh_anot
+zeroh_24h_anot<- left_join(zeroh_24h_anot, twentyfour_anot, by="ID")
+zeroh_24h_anot<- zeroh_24h_anot%>% relocate(ID)
+zeroh_24h_anot<- zeroh_24h_anot[!duplicated(zeroh_24h_anot$ID), ]
+
+pheno_at_72h$ID<- rownames(pheno_at_72h)
+seventytwo_anot <- as.data.frame(pheno_at_72h)
+colnames(seventytwo_anot)<-paste("seventwoh", colnames(seventytwo_anot), sep ="_")
+seventytwo_anot<- seventytwo_anot%>% relocate(seventwoh_ID)
+colnames(seventytwo_anot)[1]<-"ID"
+zeroh_24h_72h_anot<- zeroh_24h_anot
+zeroh_24h_72h_anot<- left_join(zeroh_24h_anot, seventytwo_anot, by="ID")
+zeroh_24h_72h_anot<- zeroh_24h_72h_anot%>% relocate(ID)
+zeroh_24h_72h_anot<- zeroh_24h_72h_anot[!duplicated(zeroh_24h_72h_anot$ID), ]
+
+#time only
+x24vs0$ID<- rownames(x24vs0)
+twentyfour_anot <- as.data.frame(x24vs0)
+colnames(twentyfour_anot)<-paste("x24vs0", colnames(twentyfour_anot), sep ="_")
+twentyfour_anot<- left_join(twentyfour_anot, sept.ann, by=c("x24vs0_ID"="ID"), keep=TRUE)
+twentyfour_anot<- twentyfour_anot[!duplicated(twentyfour_anot$ID), ]
+twentyfour_anot<- twentyfour_anot%>% relocate(ID)
+
+x72vs0$ID<- rownames(x72vs0)
+seventytwo_anot <- as.data.frame(x72vs0)
+colnames(seventytwo_anot)<-paste("x72vs0", colnames(seventytwo_anot), sep ="_")
+seventytwo_anot<- seventytwo_anot%>% relocate(x72vs0_ID)
+colnames(seventytwo_anot)[1]<-"ID"
+twofour_seventwo<- twentyfour_anot
+twofour_seventwo<- left_join(twofour_seventwo, seventytwo_anot, by="ID")
+twofour_seventwo<- twofour_seventwo%>% relocate(ID)
+twofour_seventwo<- twofour_seventwo[!duplicated(twofour_seventwo$ID), ]
+
+x72vs24$ID<- rownames(x72vs24)
+seventytwo24_anot <- as.data.frame(x72vs24)
+colnames(seventytwo24_anot)<-paste("x72vs24", colnames(seventytwo24_anot), sep ="_")
+seventytwo24_anot<- seventytwo24_anot%>% relocate(x72vs24_ID)
+colnames(seventytwo24_anot)[1]<-"ID"
+all_times<- twofour_seventwo
+all_times<- left_join(all_times, seventytwo24_anot, by="ID")
+all_times<- all_times%>% relocate(ID)
+all_times<- all_times[!duplicated(all_times$ID), ]
+
+
+
+write.table(zeroh_24h_72h_anot, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Pheno_x_Time_plus_annot.txt", sep = "\t", row.names = F)
+write.table(all_times, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/Time_plus_annot.txt", sep = "\t", row.names = F)
+
+RNAi_expression<-subset(zeroh_24h_72h_anot, (zeroh_transcriptID %in% c("72152","136267","150654","151958","129143","152010","123928")))
+RNAi_expression_time<-subset(all_times, (transcriptID %in% c("72152","136267","150654","151958","129143","152010","123928")))
+RNAi_gene_IDs_time<-RNAi_expression_time$ID
+RNAi_gene_IDs<-RNAi_expression$ID
+transcript_to_gene_IDs<-data.frame(gene=RNAi_expression_time$ID,transcript=RNAi_expression_time$transcriptID)
+write.table(RNAi_expression, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/RNAi_GOI_all_times_plus_annot.txt", sep = "\t", row.names = F)
+write.table(transcript_to_gene_IDs, file = "~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/transcript_to_gene_IDs.txt", sep = "\t", row.names = F)
+```
+
+# Plotting
+
+```{R}
+#create plot for each gene of interest in infection treatment 
+  sapply(RNAi_gene_IDs, function(elt) {
+    iter<-plotCounts(dds, elt, intgroup = c("Condition","Phenotype"), returnData = TRUE)
+    box<-ggplot(iter, aes(x=Condition, y=count, color=Phenotype)) + 
+    geom_boxplot(position = position_dodge(1))+
+    geom_point(position=position_dodge(0.15))+  
+    theme(axis.text.x = element_text(angle = 90))+
+    scale_y_continuous(trans='log2')+
+    ggtitle(elt)+
+    labs(y="Normalized count", x="Hours post inoculation", color="Response")
+
+#save plots as .pdf
+ggsave(box, file=paste("~/Smusiva_RNA_Javier/Smusiva_RNAi_transcription/",elt,".pdf", sep=''), scale=2)
+
+#print plots to screen
+#print(box)
+
+  })  
+
+```

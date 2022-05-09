@@ -1,0 +1,865 @@
+---
+title: "Septoria RNAseq analysis"
+author: "Javier F. Tabima"
+date: "9/9/2019"
+output: html_document
+---
+
+# Note (READ FIRST):
+
+This is just a reference document to check the process to obtain the DESeq2 objects. This means you don't need to re-run this file if you are looking for a comparison of all phenotypes at each time against the susceptible phenotypes at control. The files that come from this assay are:
+
+## DESeq2 required files:
+
+These files are the files that DESeq2 uses to create the lineal model for differential expression.
+
+- `~/Smusiva_RNA_Javier/list_counts.Rds`: A RDS file (R readable file) with the list of counts of gene per genotype per time
+- `~/Smusiva_RNA_Javier/count_name.Rds`: A RDS file with a data frame with information about each dataset: Genotype, Phenotype, and interactions for the lineal model used in DESeq
+
+## DESeq2 lineal model output files:
+
+These are the files output of the lineal model where everything is compared to Control-Susceptible
+
+- `~/Smusiva_RNA_Javier/data_interaction_Pheno.Rds`: A RDS file with the DESeq2 count object (dds object) for the comparison of all data sets versus Susceptible-Control
+- `~/Smusiva_RNA_Javier/vst_interaction_data_Pheno.Rds`: The normalized VST DESeq2 object from the dds object created above.
+
+***
+
+# Process
+
+## Reading libraries
+
+```{r}
+library(DESeq2)
+library(tidyverse)
+library(RColorBrewer)
+library(pheatmap)
+library(dplyr)
+library(reshape2)
+library(tidyr)
+library(ggpubr)
+library(ggfortify)
+library(pbapply)
+library(formattable)
+library(jsonlite)
+```
+
+## Reading in the raw counts
+
+```{r, eval=F}
+list.names <- list.files("~/Smusiva_RNA_Javier/Smusiva_RNA_counts", pattern = "_counts.txt", full.names = T)
+list.counts <- lapply(list.names, read.table, header=T,row.names=1)
+names(list.counts) <- basename(list.files("~/Smusiva_RNA_Javier/Smusiva_RNA_counts/", pattern = "_counts.txt", full.names = T)) %>% gsub(pattern = "_counts.txt", replacement = "")
+
+# Time-point name data
+count_name <- read.table("~/Smusiva_RNA_Javier/sample_time_points.txt", header=F)
+colnames(count_name) <- c("Index","Sample","Treatment","Rep")
+```
+
+## Changing the names to time-points 
+
+```{r, eval=F}
+for (i in 1:length(list.counts)){
+  count_name.sub <- count_name[count_name$Sample %in% names(list.counts)[[i]],]
+  col.names <- unname(count_name.sub[match(colnames(list.counts[[i]]), count_name.sub$Index),c(2,3,4)] %>% apply(MARGIN = 1, paste0, collapse="_"))
+  colnames(list.counts[[i]]) <- col.names
+}
+```
+
+## Creating the condition table from the time-point name data
+
+```{r, eval=F}
+rownames(count_name) <- apply(count_name[,c(2,3,4)], MARGIN = 1, paste0, collapse = "_")
+count_name <- count_name[,-c(1,4)]
+count_name$type <- "paired_end"
+colnames(count_name) <- c("SampleName","Condition","Type")
+count_name$rnam<-row.names(count_name)
+```
+
+## Combining the data
+
+```{r, eval=F}
+for (i in 1:length(list.counts)){
+  list.counts[[i]] <-  list.counts[[i]] + 1
+}
+list.counts <- as.data.frame(do.call(cbind, unname(list.counts)))
+```
+
+## Adding the phenotypes
+
+```{r, eval=F}
+phenotypes <- read.table("Phenotypes", header = T)
+phenotypes$Phenotype[phenotypes$Phenotype %in% "?"] <- "Resistant"
+count_name.data.2 <- merge(count_name, phenotypes, by="SampleName")
+
+rownames(count_name.data.2) <- count_name.data.2$rnam
+count_name.data <- count_name.data.2
+count_name.data <- count_name.data[match(colnames(list.counts), rownames(count_name.data), nomatch = 0),]
+count_name.data$interaction <- paste0(count_name.data$SampleName, "_", count_name.data$Phenotype)
+colnames(list.counts) %in% rownames(count_name.data)
+
+#saveRDS(list.counts, file = "~/Smusiva_RNA_Javier/list_counts.Rds")
+#saveRDS(count_name.data, file = "~/Smusiva_RNA_Javier/count_name.Rds")
+```
+
+## Creating the DESeq object 
+
+```{r, eval=F}
+ #list.counts <- readRDS("~/Smusiva_RNA_Javier/list_counts.Rds")
+ #count_name.data <- readRDS("~/Smusiva_RNA_Javier/count_name.Rds")
+ #count_name.data$time_inter <- paste(count_name.data$Condition, count_name.data$Phenotype, sep = "_")
+ #dds <- DESeqDataSetFromMatrix(countData = list.counts,
+ #                              colData = count_name.data,
+ #                              design = ~ time_inter)
+ #
+ #dds$Condition<- factor(dds$Condition, levels=c("Control","0h","24h","72h"), ordered = FALSE)
+ #dds$Condition <- relevel(dds$Condition, "Control")
+ #dds$Phenotype <- factor(dds$Phenotype, levels=c("Susceptible","Resistant"), ordered = FALSE)
+ #dds$Phenotype <- relevel(dds$Phenotype, "Susceptible")
+ #dds$time_inter <- factor(dds$time_inter, levels =  #c("Control_Susceptible","Control_Resistant","0h_Susceptible","0h_Resistant","24h_Susceptible","24h_Resistant","72h_Susceptible","72h_Resistant") #, ordered = FALSE)
+ #dds$time_inter <- relevel(dds$time_inter, "Control_Susceptible")
+ #dds <- DESeq(dds)
+ #vst.data <- vst(dds, blind = FALSE)
+
+#saveRDS(dds, file="~/Smusiva_RNA_Javier/data_interaction_Pheno.Rds")
+#saveRDS(vst.data, file="~/Smusiva_RNA_Javier/vst_interaction_data_Pheno.Rds")
+
+```
+
+
+for Michael's purposes, the resistant vs susceptible distinction might not matter?
+perhaps write a design that tests factors individually, see other analysis.
+there is probabbly very little Smusiva RNA in the 0h samples and should be none in Control.
+So, perhaps it would make sense to test 24 vs 0 and 72 vs 0 and 72 vs 24.
+Could also just plot normalized counts (vst?) for the transcripts of interest.
+```{r, eval=F}
+#list.counts <- readRDS("Smusiva_Analysis/list_counts.Rds")
+#count_name.data <- readRDS("Smusiva_Analysis/count_name.Rds")
+
+#removing  control samples because we don't expect S.musiva reads in control samples
+list.counts.noc<-list.counts %>% select(!contains("Control"))
+count_name.data.noc<-subset(count_name.data, count_name.data$Condition != "Control")
+
+#specifying inputs and statistical model
+dds <- DESeqDataSetFromMatrix(countData = list.counts.noc,
+                              colData = count_name.data.noc,
+                              design = ~ Phenotype + Condition + Phenotype:Condition)
+#assigning refrence levels
+dds$Phenotype <- relevel(dds$Phenotype, ref = "Susceptible")
+dds$Condition <- relevel(dds$Condition, ref = "0h")
+#running DESeq and variace stabilization aware of design
+dds <- DESeq(dds)
+vst.data <- vst(dds, blind = FALSE)
+
+#saving DESeq outputs as R data object
+saveRDS(dds, file="~/Smusiva_RNA_Javier/full_models.Rds")
+saveRDS(vst.data, file="~/Smusiva_RNA_Javier/full_model.vst.Rds")
+```
+
+
+## Differential expression genes
+
+```{r}
+#dds <- readRDS(file="~/Smusiva_RNA_Javier/full_models.Rds")
+#vst.data <- readRDS(file="~/Smusiva_RNA_Javier/full_model.vst.Rds")
+ time_comp <- lapply(levels(dds$time_inter)[-1], function (x) {
+    cat(x)
+    cat("\n")
+    resLFC1 <- results(dds, contrast = c("time_inter",x,"Control_Susceptible"))
+    resLFC1
+  })  
+
+# saveRDS(time_comp, file="~/Smusiva_RNA_Javier/time_comp.list.Rds")
+time_comp <- readRDS(file="~/Smusiva_RNA_Javier/time_comp.list.Rds")
+names(time_comp) <- levels(dds$time_inter)[-1]
+
+# all genes
+gene_list.df <- lapply(1:length(time_comp), function (x) {
+  df.x <- data.frame(time_comp[x])
+})
+
+# Determining genes differentially expressed on Resistant
+time_comp.resistant <- lapply(time_comp[grep(names(time_comp), pattern = "Resistant")], function (x) {
+  subset(dds, x$padj < 0.05) %>% results() %>% row.names()
+}) %>% unlist %>% unique
+
+# Determining genes are also differentially expressed on Susceptible
+
+time_comp.suscept <- lapply(time_comp[grep(names(time_comp), pattern = "Resistant", invert = T)], function (x) {
+  subset(dds, x$padj < 0.05) %>% results() %>% row.names()
+}) %>% unlist %>% unique
+
+# Comparing names to retain the genes that are Resistant and not in susceptible
+resistant.genes <- time_comp.resistant[!time_comp.resistant %in% time_comp.suscept]
+
+# Extracting the resistant genes for all DDS
+dif_exp.gene_list <- lapply(time_comp, function (x){
+  x[rownames(x) %in% resistant.genes,]
+})
+names(dif_exp.gene_list) <- levels(dds$time_inter)[-1]
+
+dif_exp.gene_list.df <- lapply(1:length(dif_exp.gene_list), function (x) {
+  df.x <- data.frame(dif_exp.gene_list[x])
+})
+
+# FINAL LIST OF DIF.EXP. GENES
+dif_exp.gene_list.df <- do.call(cbind, dif_exp.gene_list.df)
+all.gene_list.df <- do.call(cbind, gene_list.df)
+#write.table(dif_exp.gene_list.df, file = "~/Smusiva_RNA_Javier/all.res.txt", sep = "\t")
+#write.table(all.gene_list.df, file = "~/Smusiva_RNA_Javier/differentially_expressed.res.txt", sep = "\t")
+#all.gene_list.df <- read.table("~/Smusiva_RNA_Javier/differentially_expressed.res.txt")
+#dif_exp.gene_list.df <- read.table("~/Smusiva_RNA_Javier/all.res.txt")
+```
+
+## PCA
+
+# Loading in annotation data
+
+Start by including the annotation table of the *S. musiva* reference genome obtained from JGI:
+
+```{r, cache=T}
+sept.ann <- read_delim("Sepmu1_FilteredModels1_deflines.gff3", delim = "\t", comment = "#", col_names = F)
+sept.ann <- sept.ann[sept.ann$X3 %in% "gene",]
+sept.ann <- separate(sept.ann, col = "X9", sep = ";", c("ID","Name","portal_ID","product_name","proteinID","transcriptID"))
+sept.ann$proteinID <- gsub(sept.ann$proteinID, pattern = "proteinId=", replacement = "")
+sept.ann$transcriptID <- gsub(sept.ann$transcriptID, pattern = "transcriptId=", replacement = "")
+sept.ann$product_name <- gsub(sept.ann$product_name, pattern = "product_name=", replacement = "")
+sept.ann$ID <- gsub(sept.ann$ID, pattern = "ID=", replacement = "")
+RNAi_GOIs<-c(72152,136267,150654,151958,129143,152010,123928)
+# Adding effector info
+
+Effector.tab <- read_csv("~/Smusiva_RNA_Javier/Effector_table_SM3.csv")
+sept.ann[sept.ann$transcriptID %in% Effector.tab$transcriptID,]$product_name <- "Predicted_Effector"
+```
+
+# Loading in dds data
+
+We are loading in the diferentially expressed data we have created in the previous steps where `Susceptible at 0h` is used as control as shown here:
+
+
+```{r, cache=T, include=TRUE}
+dds <- readRDS(file="~/Smusiva_RNA_Javier/data_interaction_Pheno.Rds")
+vst.data <- readRDS(file="~/Smusiva_RNA_Javier/vst_interaction_data_Pheno.Rds")
+
+time_comp <- readRDS(file="~/Smusiva_RNA_Javier/time_comp.list.Rds")
+names(time_comp) <- levels(dds$time_inter)[-1]
+```
+# Return results for all genes
+
+```{r}
+time_comp.suscept <- lapply(time_comp[grep(names(time_comp), pattern = "0h")], function (x) {
+  subset(dds, x$padj < 0.01) %>% results()
+})
+```
+
+# Genes differentially expressed at 0h
+
+We subset the dataset into genes that have an adjusted **p-value of < 0.01**:
+
+```{r}
+time_comp.suscept <- lapply(time_comp[grep(names(time_comp), pattern = "0h")], function (x) {
+  subset(dds, x$padj < 0.01) %>% results()
+})
+```
+
+Also that have a fold change difference **greater|lesser than 1 fold change**:
+
+```{r}
+time_comp.suscept <- lapply(time_comp.suscept, function (x) {
+x[x$log2FoldChange > 1 | x$log2FoldChange < -1 , ]
+})
+```
+
+And separated the **upregulated** genes from the **downregulated** genes based on fold change, where a `fold change > 0` means upregulated and `fold change < 0` means downregulated:
+
+```{r}
+upreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange > 0,]
+})
+
+downreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange < 0,]
+})
+
+downreg.suc.0 <- downreg.suc
+upreg.suc.0 <- upreg.suc
+
+downreg.suc.0 <- lapply(downreg.suc.0, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+
+upreg.suc.0 <- lapply(upreg.suc.0, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+```
+
+Here are the number of differentially expressed genes:
+
+```{r}
+name.counts.up <- lapply(upreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+name.counts.down <- lapply(downreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+
+names.all <- c(name.counts.up, name.counts.down) %>% unique
+
+knitr::kable(data.frame("Upregulated"=length(name.counts.up), "Downregulated"= length(name.counts.down)))
+```
+
+```{r}
+gene.presence.up <- lapply(upreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.up) <- paste0(colnames(gene.presence.up), "_Up")
+
+gene.presence.down <- lapply(downreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.down) <- paste0(colnames(gene.presence.down), "_Down")
+
+gene.presence <- cbind(gene.presence.up, gene.presence.down)
+
+#### Hour
+gene.presence$`0h_Resistant_Up`[gene.presence$`0h_Resistant_Up` == T] <- "Res_Up"
+gene.presence$`0h_Susceptible_Up`[gene.presence$`0h_Susceptible_Up` == T] <- "Susc_Up"
+gene.presence$`0h_Resistant_Down`[gene.presence$`0h_Resistant_Down` == T] <- "Res_Down"
+gene.presence$`0h_Susceptible_Down`[gene.presence$`0h_Susceptible_Down` == T] <- "Susc_Down"
+
+gene.summary <- apply(gene.presence, 1, function (x) paste0(x, collapse = "_")) %>% gsub(pattern = "_FALSE|FALSE_", replacement = "")
+gene.summary <- tibble(names.all,gene.summary)
+gene.summary.0 <- gene.summary
+
+gs.df <- table(gene.summary$gene.summary) %>% sort(decreasing = T) %>% as.data.frame
+colnames(gs.df) <- c("Genotype_DF","Number of genes")
+```
+
+Here, the different categories mean:
+
+- `Res_Up`: <span style="color: blue;">Resistant</span> and <span style="color: green;">Upregulated</span>
+- `Res_Down`: <span style="color: blue;">Resistant</span> and <span style="color: red;">Downregulated</span>
+- `Susc_Up`: <span style="color: orange;">Susceptible</span> and <span style="color: green;">Upregulated</span>
+- `Susc_Down`: <span style="color: orange;">Susceptible</span> and <span style="color: red;">Downregulated</span>
+- `Res_Down_Susc_Down`:<span style="color: blue;">Resistant</span> and <span style="color: orange;">Susceptible</span>, <span style="color: red;">Downregulated</span>
+- `Res_Up_Susc_Up`:<span style="color: blue;">Resistant</span> and<span style="color: orange;">Susceptible</span>, <span style="color: green;">Upregulated</span>
+
+
+```{r}
+knitr::kable(gs.df)
+```
+
+```{r, fig.width=12}
+ggplot(gene.summary, aes(x=gene.summary)) + geom_bar()
+```
+
+The following code adds the annotation of the reference genome into the list of differentially expressed genes:
+
+```{r}
+gene.functs <- lapply(unique(gene.summary$gene.summary), function (i){
+  unique.names <- gene.summary$names.all[gene.summary$gene.summary %in% i]
+  df.names <- sept.ann[sept.ann$ID %in% unique.names,]$product_name %>% table %>% as.data.frame
+  df.names <- df.names[order(df.names$Freq, decreasing = T),]
+  mutate(df.names,Freq = color_bar("lightgreen")(Freq),
+  )
+})
+
+names(gene.functs) <- unique(gene.summary$gene.summary)
+```
+
+## Downregulated: Resistant and Susceptible
+```{r, results="as.is"}
+knitr::kable(gene.functs[[1]])
+```
+
+## Downregulated: Resistant only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[2]])
+```
+
+***
+
+# Genes differentially expressed at 24h
+
+Same filtering than before.
+
+```{r}
+time_comp.suscept <- lapply(time_comp[grep(names(time_comp), pattern = "24h")], function (x) {
+  subset(x, x$padj < 0.01) 
+})
+
+time_comp.suscept <- lapply(time_comp.suscept, function (x) {
+x[x$log2FoldChange > 1 | x$log2FoldChange < -1 , ]
+})
+
+upreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange > 0,]
+})
+
+downreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange < 0,]
+})
+
+downreg.suc.24 <- downreg.suc
+upreg.suc.24 <- upreg.suc
+
+downreg.suc.24 <- lapply(downreg.suc.24, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+
+upreg.suc.24 <- lapply(upreg.suc.24, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+```
+
+
+
+```{r}
+name.counts.up <- lapply(upreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+name.counts.down <- lapply(downreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+
+names.all <- c(name.counts.up, name.counts.down) %>% unique
+
+knitr::kable(data.frame("Upregulated"=length(name.counts.up), "Downregulated"= length(name.counts.down)))
+```
+
+Here, the different categories mean:
+
+- `Res_Up`: <span style="color: blue;">Resistant</span> and <span style="color: green;">Upregulated</span>
+- `Res_Down`: <span style="color: blue;">Resistant</span> and <span style="color: red;">Downregulated</span>
+- `Susc_Up`: <span style="color: orange;">Susceptible</span> and <span style="color: green;">Upregulated</span>
+- `Susc_Down`: <span style="color: orange;">Susceptible</span> and <span style="color: red;">Downregulated</span>
+- `Res_Down_Susc_Down`:<span style="color: blue;">Resistant</span> and <span style="color: orange;">Susceptible</span>, <span style="color: red;">Downregulated</span>
+- `Res_Up_Susc_Up`:<span style="color: blue;">Resistant</span> and<span style="color: orange;">Susceptible</span>, <span style="color: green;">Upregulated</span>
+
+```{r}
+gene.presence.up <- lapply(upreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.up) <- paste0(colnames(gene.presence.up), "_Up")
+
+gene.presence.down <- lapply(downreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.down) <- paste0(colnames(gene.presence.down), "_Down")
+
+gene.presence <- cbind(gene.presence.up, gene.presence.down)
+
+#### Hour
+gene.presence$`24h_Resistant_Up`[gene.presence$`24h_Resistant_Up` == T] <- "Res_Up"
+gene.presence$`24h_Susceptible_Up`[gene.presence$`24h_Susceptible_Up` == T] <- "Susc_Up"
+gene.presence$`24h_Resistant_Down`[gene.presence$`24h_Resistant_Down` == T] <- "Res_Down"
+gene.presence$`24h_Susceptible_Down`[gene.presence$`24h_Susceptible_Down` == T] <- "Susc_Down"
+
+gene.summary <- apply(gene.presence, 1, function (x) paste0(x, collapse = "_")) %>% gsub(pattern = "_FALSE|FALSE_", replacement = "")
+gene.summary <- tibble(names.all,gene.summary)
+gene.summary.24 <- gene.summary
+
+gs.df <- table(gene.summary$gene.summary) %>% sort(decreasing = T) %>% as.data.frame
+colnames(gs.df) <- c("Genotype_DF","Number of genes")
+```
+
+
+```{r, fig.width=12}
+ggplot(gene.summary, aes(x=gene.summary)) + geom_bar()
+```
+
+Adding gene annotations.
+
+```{r}
+gene.functs <- lapply(unique(gene.summary$gene.summary), function (i){
+  unique.names <- gene.summary$names.all[gene.summary$gene.summary %in% i]
+  df.names <- sept.ann[sept.ann$ID %in% unique.names,]$product_name %>% table %>% as.data.frame
+  df.names <- df.names[order(df.names$Freq, decreasing = T),]
+  mutate(df.names,Freq = color_bar("lightgreen")(Freq),
+  )
+})
+
+names(gene.functs) <- unique(gene.summary$gene.summary)
+```
+
+## Upregulated: Resistant and Susceptible
+```{r, results="as.is"}
+knitr::kable(gene.functs[[1]])
+```
+
+## Upregulated: Resistant only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[2]])
+```
+
+## Upregulated: Susceptible only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[3]])
+```
+
+## Downregulated: Resistant and Susceptible
+```{r, results="as.is"}
+knitr::kable(gene.functs[[5]])
+```
+
+## Downregulated: Resistant only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[4]])
+```
+
+## Downregulated: Susceptible only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[6]])
+```
+
+***
+
+# Genes differentially expressed at 72h
+
+Filtering step.
+
+```{r}
+time_comp.suscept <- lapply(time_comp[grep(names(time_comp), pattern = "72h")], function (x) {
+  subset(x, x$padj < 0.01)
+})
+
+time_comp.suscept <- lapply(time_comp.suscept, function (x) {
+x[x$log2FoldChange > 1 | x$log2FoldChange < -1 , ]
+})
+
+upreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange > 0,]
+})
+
+downreg.suc <- lapply(time_comp.suscept, function (x) {
+  x[x$log2FoldChange < 0,]
+})
+
+downreg.suc.72 <- downreg.suc
+upreg.suc.72 <- upreg.suc
+
+downreg.suc.72 <- lapply(downreg.suc.72, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+
+upreg.suc.72 <- lapply(upreg.suc.72, function (x){
+  x$ID <- rownames(x)
+  x <- as.data.frame(x)
+  x <- left_join(x, sept.ann, by="ID")
+  x <- x %>% relocate(ID)
+  x[!duplicated(x$ID),]
+})
+```
+
+```{r}
+name.counts.up <- lapply(upreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+name.counts.down <- lapply(downreg.suc, function (x) rownames(x)) %>% unname %>% unlist %>% unique
+
+names.all <- c(name.counts.up, name.counts.down) %>% unique
+
+
+```
+
+```{r}
+gene.presence.up <- lapply(upreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.up) <- paste0(colnames(gene.presence.up), "_Up")
+
+gene.presence.down <- lapply(downreg.suc, function (x){
+  names.all %in% rownames(x)
+}) %>% bind_rows
+colnames(gene.presence.down) <- paste0(colnames(gene.presence.down), "_Down")
+
+gene.presence <- cbind(gene.presence.up, gene.presence.down)
+
+#### Hour
+gene.presence$`72h_Resistant_Up`[gene.presence$`72h_Resistant_Up` == T] <- "Res_Up"
+gene.presence$`72h_Susceptible_Up`[gene.presence$`72h_Susceptible_Up` == T] <- "Susc_Up"
+gene.presence$`72h_Resistant_Down`[gene.presence$`72h_Resistant_Down` == T] <- "Res_Down"
+gene.presence$`72h_Susceptible_Down`[gene.presence$`72h_Susceptible_Down` == T] <- "Susc_Down"
+
+gene.summary <- apply(gene.presence, 1, function (x) paste0(x, collapse = "_")) %>% gsub(pattern = "_FALSE|FALSE_", replacement = "")
+gene.summary <- tibble(names.all,gene.summary)
+gene.summary.72 <- gene.summary
+
+gs.df <- table(gene.summary$gene.summary) %>% sort(decreasing = T) %>% as.data.frame
+colnames(gs.df) <- c("Genotype_DF","Number of genes")
+```
+
+Here, the different categories mean:
+
+- `Res_Up`: <span style="color: blue;">Resistant</span> and <span style="color: green;">Upregulated</span>
+- `Res_Down`: <span style="color: blue;">Resistant</span> and <span style="color: red;">Downregulated</span>
+- `Susc_Up`: <span style="color: orange;">Susceptible</span> and <span style="color: green;">Upregulated</span>
+- `Susc_Down`: <span style="color: orange;">Susceptible</span> and <span style="color: red;">Downregulated</span>
+- `Res_Down_Susc_Down`:<span style="color: blue;">Resistant</span> and <span style="color: orange;">Susceptible</span>, <span style="color: red;">Downregulated</span>
+- `Res_Up_Susc_Up`:<span style="color: blue;">Resistant</span> and<span style="color: orange;">Susceptible</span>, <span style="color: green;">Upregulated</span>
+
+
+```{r}
+knitr::kable(gs.df)
+```
+
+```{r, fig.width=12}
+ggplot(gene.summary, aes(x=gene.summary)) + geom_bar()
+```
+
+
+```{r}
+gene.functs <- lapply(unique(gene.summary$gene.summary), function (i){
+  unique.names <- gene.summary$names.all[gene.summary$gene.summary %in% i]
+  df.names <- sept.ann[sept.ann$ID %in% unique.names,]$product_name %>% table %>% as.data.frame
+  df.names <- df.names[order(df.names$Freq, decreasing = T),]
+  mutate(df.names,Freq = color_bar("lightgreen")(Freq),
+  )
+})
+
+names(gene.functs) <- unique(gene.summary$gene.summary)
+```
+
+## Upregulated: Resistant and Susceptible
+```{r, results="as.is"}
+knitr::kable(gene.functs[[2]])
+```
+
+## Upregulated: Resistant only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[1]])
+```
+
+## Upregulated: Susceptible only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[3]])
+```
+
+## Downregulated: Resistant and Susceptible
+```{r, results="as.is"}
+knitr::kable(gene.functs[[4]])
+```
+
+## Downregulated: Resistant only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[5]])
+```
+
+## Downregulated: Susceptible only
+```{r, results="as.is"}
+knitr::kable(gene.functs[[6]])
+```
+
+***
+# Saving a summary of genes on an excel file
+
+```{r, eval=F, include=F}
+library(xlsx)
+write.xlsx(downreg.suc.0[[1]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Res_0h", row.names=F)
+write.xlsx(downreg.suc.0[[2]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Susc_0h", append=TRUE, row.names=F)
+write.xlsx(upreg.suc.24[[1]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Upregulated_Res_24h", append=TRUE, row.names=F)
+write.xlsx(upreg.suc.24[[2]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Upregulated_Susc_24h", append=TRUE, row.names=F)
+write.xlsx(downreg.suc.24[[1]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Res_24h", append=TRUE, row.names=F)
+write.xlsx(downreg.suc.24[[2]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Suc_24h", append=TRUE, row.names=F)
+write.xlsx(upreg.suc.72[[1]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Upregulated_Res_72h", append=TRUE, row.names=F)
+write.xlsx(upreg.suc.72[[2]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Upregulated_Susc_72h", append=TRUE, row.names=F)
+write.xlsx(downreg.suc.72[[1]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Res_72h", append=TRUE, row.names=F)
+write.xlsx(downreg.suc.72[[2]], file="~/Smusiva_RNA_Javier/Differential_Expression.xlsx", sheetName="Downregulated_Susc_72h", append=TRUE, row.names=F)
+```
+
+# Genes per time and genotype
+
+```{r}
+# 0H
+h0_res <- data.frame("Gene" =downreg.suc.0[[1]]$ID, "color"="red")
+
+h0_sus <- data.frame("Gene" =downreg.suc.0[[2]]$ID, "color"="red")
+
+# 24H
+h24_res <- bind_rows(data.frame("Gene" =upreg.suc.24[[1]]$ID, "color"="green"), data.frame("Gene"=downreg.suc.24[[1]]$ID, "color"="red"))
+
+h24_sus <- bind_rows(data.frame("Gene" =upreg.suc.24[[2]]$ID, "color"="green"), data.frame("Gene" =downreg.suc.24[[2]]$ID, "color"="red"))
+
+# 72H
+h72_res <- bind_rows(data.frame("Gene" =upreg.suc.72[[1]]$ID, "color"="green"), data.frame("Gene"=downreg.suc.72[[1]]$ID, "color"="red"))
+
+h72_sus <- bind_rows(data.frame("Gene" =upreg.suc.72[[2]]$ID, "color"="green"), data.frame("Gene" =downreg.suc.72[[2]]$ID, "color"="red"))
+```
+
+***
+
+# Other genes
+
+## HYBRIDS of interest:
+
+Reading in the GFF
+```{r}
+sep.gff <- read_delim("Sepmu1_FilteredModels1_deflines.gff3", delim = "\t", comment = "#", col_names = F)
+sep.gff <- sep.gff[sep.gff$X3 %in% "gene",]
+sep.gff <- separate(col = 'X9', data = sep.gff, into = c("ID","Name","Portal","ProductName","proteinId","transcriptId"), sep = ";")
+sep.gff$proteinID <- gsub(sep.gff$proteinId, pattern = "proteinId=", replacement = "")
+sep.gff$ID <- gsub(sep.gff$ID, pattern = "ID=", replacement = "")
+```
+
+### Clan 3030 (scaffold_6: 1506270-1552738 SEPMUDRAFT_164461)
+
+```{r}
+sep.2032 <- sep.gff[sep.gff$X1 %in% "scaffold_6" & sep.gff$X4 >= 1506270  & sep.gff$X4 <= 1552738,]
+sep.3030 <- sep.2032
+
+rna.sep.3030 <- all.gene_list.df[rownames(all.gene_list.df) %in% sep.3030$ID,]
+
+rna.sep.3030$locusName <- rownames(rna.sep.3030)
+rna.sep.2032.m <- melt(rna.sep.3030)
+
+lapply(unique(rna.sep.2032.m$locusName), function (y) {
+    gene.name <- y
+    df.gene <- rna.sep.2032.m[rna.sep.2032.m$locusName %in% y,]
+    df.gene <- separate(df.gene, col = 2, sep = "_", into = c("Time","Treatment"))
+    df.gene$Treatment <- gsub(df.gene$Treatment, pattern = ".", replacement = "_", fixed = T)
+    df.gene <- separate(df.gene, col = 3, sep = "_", into = c("Treatment","stat"))
+    df.gene <- df.gene[df.gene$stat %in% c("log2FoldChange","padj","lfcSE"),]
+    df.gene <- dcast(df.gene, Time + Treatment ~ stat)
+    df.gene$padj[df.gene$padj < 0.01] <- "**"
+    df.gene$padj[df.gene$padj < 0.05] <- "*"
+    df.gene$padj[df.gene$padj > 0.05] <- NA
+    g <- ggplot(df.gene, aes(x=Time, y=log2FoldChange, fill=Treatment)) +
+    geom_bar(stat="identity", position = "dodge") + 
+    geom_errorbar(aes(ymin = log2FoldChange - lfcSE, ymax = log2FoldChange + lfcSE), position = position_dodge2(width = 0.5, padding = 0.5, preserve = "single")) +  
+    geom_label(aes(label=padj, y=max(df.gene$log2FoldChange) + max(df.gene$lfcSE)), fill = "black", colour = "white", fontface = "bold") + 
+    theme_classic() + 
+    scale_fill_viridis_d(begin = 0.3) + 
+    ggtitle(gene.name) + 
+    ylab("log2(Fold Change)") +
+    xlab("Timepoint")
+    ggsave(g, filename = paste0("~/Smusiva_RNA_Javier/SM_Expression/Sepmu_164461/", gene.name, ".pdf"), device = "pdf", width = 6, height = 4)
+})
+```
+
+### Clan 2032 (scaffold_8:959116-1014458, SEPMUDRAFT_134958)
+
+```{r}
+sep.2032 <- sep.gff[sep.gff$X1 %in% "scaffold_8" & sep.gff$X4 >= 959116  & sep.gff$X4 <= 1014458,]
+sep.2032.g <- sep.2032
+rna.sep.2032 <- all.gene_list.df[rownames(all.gene_list.df) %in% sep.2032$ID,]
+
+rna.sep.2032$locusName <- rownames(rna.sep.2032)
+rna.sep.2032.m <- melt(rna.sep.2032)
+
+lapply(unique(rna.sep.2032.m$locusName), function (y) {
+    gene.name <- y
+    df.gene <- rna.sep.2032.m[rna.sep.2032.m$locusName %in% y,]
+    df.gene <- separate(df.gene, col = 2, sep = "_", into = c("Time","Treatment"))
+    df.gene$Treatment <- gsub(df.gene$Treatment, pattern = ".", replacement = "_", fixed = T)
+    df.gene <- separate(df.gene, col = 3, sep = "_", into = c("Treatment","stat"))
+    df.gene <- df.gene[df.gene$stat %in% c("log2FoldChange","padj","lfcSE"),]
+    df.gene <- dcast(df.gene, Time + Treatment ~ stat)
+    df.gene$padj[df.gene$padj < 0.01] <- "**"
+    df.gene$padj[df.gene$padj < 0.05] <- "*"
+    df.gene$padj[df.gene$padj > 0.05] <- NA
+    g <- ggplot(df.gene, aes(x=Time, y=log2FoldChange, fill=Treatment)) +
+    geom_bar(stat="identity", position = "dodge") + 
+    geom_errorbar(aes(ymin = log2FoldChange - lfcSE, ymax = log2FoldChange + lfcSE), position = position_dodge2(width = 0.5, padding = 0.5, preserve = "single")) +  
+    geom_label(aes(label=padj, y=max(df.gene$log2FoldChange) + max(df.gene$lfcSE)), fill = "black", colour = "white", fontface = "bold") + 
+    theme_classic() + 
+    scale_fill_viridis_d(begin = 0.3) + 
+    ggtitle(gene.name) + 
+    ylab("log2(Fold Change)") +
+    xlab("Timepoint")
+    ggsave(g, filename = paste0("~/Smusiva_RNA_Javier/SM_Expression/Sepmu_134958/", gene.name, ".pdf"), device = "pdf", width = 6, height = 4)
+})
+```
+
+### Clan 3571 (scaffold_6:1975528-2004431)
+
+```{r}
+sep.2032 <- sep.gff[sep.gff$X1 %in% "scaffold_6" & sep.gff$X4 >= 1975528  & sep.gff$X4 <= 2004431,]
+sep.3571 <- sep.2032
+rna.sep.2032 <- all.gene_list.df[rownames(all.gene_list.df) %in% sep.2032$ID,]
+
+rna.sep.2032$locusName <- rownames(rna.sep.2032)
+rna.sep.2032.m <- melt(rna.sep.2032)
+
+lapply(unique(rna.sep.2032.m$locusName), function (y) {
+    gene.name <- y
+    df.gene <- rna.sep.2032.m[rna.sep.2032.m$locusName %in% y,]
+    df.gene <- separate(df.gene, col = 2, sep = "_", into = c("Time","Treatment"))
+    df.gene$Treatment <- gsub(df.gene$Treatment, pattern = ".", replacement = "_", fixed = T)
+    df.gene <- separate(df.gene, col = 3, sep = "_", into = c("Treatment","stat"))
+    df.gene <- df.gene[df.gene$stat %in% c("log2FoldChange","padj","lfcSE"),]
+    df.gene <- dcast(df.gene, Time + Treatment ~ stat)
+    df.gene$padj[df.gene$padj < 0.01] <- "**"
+    df.gene$padj[df.gene$padj < 0.05] <- "*"
+    df.gene$padj[df.gene$padj > 0.05] <- NA
+    g <- ggplot(df.gene, aes(x=Time, y=log2FoldChange, fill=Treatment)) +
+    geom_bar(stat="identity", position = "dodge") + 
+    geom_errorbar(aes(ymin = log2FoldChange - lfcSE, ymax = log2FoldChange + lfcSE), position = position_dodge2(width = 0.5, padding = 0.5, preserve = "single")) +  
+    geom_label(aes(label=padj, y=max(df.gene$log2FoldChange) + max(df.gene$lfcSE)), fill = "black", colour = "white", fontface = "bold") + 
+    theme_classic() + 
+    scale_fill_viridis_d(begin = 0.3) + 
+    ggtitle(gene.name) + 
+    ylab("log2(Fold Change)") +
+    xlab("Timepoint")
+    ggsave(g, filename = paste0("~/Smusiva_RNA_Javier/SM_Expression/Sepmu_134219/", gene.name, ".pdf"), device = "pdf", width = 6, height = 4)
+})
+```
+
+
+# Gene counts for genes of interest:
+
+```{r}
+res.dds <- results(dds)
+goi <- c(sep.2032.g$ID, sep.3030$ID, sep.3571$ID)
+
+topGene <- rownames(dds)[rownames(results(dds)) %in% goi]
+topGene.dds <- dds[grep(pattern = paste0(goi, collapse = "|"), x=rownames(results(dds))),]
+
+geneCounts <- lapply(topGene, function (x){
+  df.1 <- plotCounts(topGene.dds, gene = x, intgroup = c("SampleName","Condition","Phenotype"),returnData = TRUE)
+  df.1$group <- paste0(df.1$Phenotype,"_", df.1$Condition)
+  df.1
+})
+
+geneCounts <- lapply(c(1:length(geneCounts)), function (x) {
+  df.1 <- geneCounts[[x]] %>% group_by(group) %>% summarize(mean = mean(count), sd = sd(count))
+  df.1$gene <- topGene[x]
+  df.1
+}) 
+
+geneCounts <- bind_rows(geneCounts)
+geneCounts <- separate(geneCounts,col = 1, into = c("Phenotype","Condition"))
+
+ggplot(geneCounts, aes(x = Condition, y = mean, color = Phenotype, group = Phenotype)) +
+  scale_y_log10() + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.05)) +
+  geom_line()  + 
+  facet_wrap(gene ~ ., ncol = 5)
+
+
+ggplot(geneCounts[geneCounts$gene %in% "gene_6472",], aes(x = Condition, y = mean, color = Phenotype, group = Phenotype)) +
+  scale_y_log10() + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.05)) +
+  geom_line()  + 
+  facet_wrap(gene ~ .)
+
+ggplot(geneCounts[geneCounts$gene %in% "gene_6299",], aes(x = Condition, y = mean, color = Phenotype, group = Phenotype)) +
+  scale_y_log10() + 
+  geom_point() +
+  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2, position=position_dodge(0.05)) +
+  geom_line()  + 
+  facet_wrap(gene ~ .)
+```
+
+***
